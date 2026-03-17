@@ -20,24 +20,44 @@ const PELOTON_ITEMS = [
   { title: 'Peloton: Evening Mobility with Kirra Michel', duration: '20 min', type: 'Workout', category: 'mobility', image: 'https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?w=400&h=240&fit=crop' },
   { title: 'Peloton Adrian Williams: HIIT', duration: '10 min', type: 'Workout', category: 'cardio', image: 'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=400&h=240&fit=crop' },
   { title: 'Peloton: Morning Stretch', duration: '15 min', type: 'Stretch', category: 'mobility', image: 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=400&h=240&fit=crop' },
+  { title: 'Peloton: Tread Bootcamp', duration: '30 min', type: 'Workout', category: 'running', image: 'https://images.unsplash.com/photo-1534258936925-c58bed479fcb?w=400&h=240&fit=crop' },
+  { title: 'Peloton: Upper Body Strength', duration: '25 min', type: 'Workout', category: 'strength', image: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=400&h=240&fit=crop' },
+  { title: 'Peloton: Power Yoga Flow', duration: '45 min', type: 'Yoga', category: 'yoga', image: 'https://images.unsplash.com/photo-1545205597-3d9d02c29597?w=400&h=240&fit=crop' },
+  { title: 'Peloton: Tabata Ride', duration: '20 min', type: 'Workout', category: 'cardio', image: 'https://images.unsplash.com/photo-1517649763962-0c623066013b?w=400&h=240&fit=crop' },
+  { title: 'Peloton: Foam Rolling Recovery', duration: '10 min', type: 'Recovery', category: 'mobility', image: 'https://images.unsplash.com/photo-1599901860904-17e6ed7083a0?w=400&h=240&fit=crop' },
 ];
 
 const SLEEP_ITEMS = [
   { title: 'Relax from head to toe', duration: '22 min', type: 'Mindfulness', category: 'mindful', image: 'https://images.unsplash.com/photo-1541783245831-57d6fb0926d3?w=400&h=240&fit=crop' },
   { title: 'Comfort sounds for sleep', duration: '5 min', type: 'Mindfulness', category: 'mindful', image: 'https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af?w=400&h=240&fit=crop' },
   { title: 'Deep sleep meditation', duration: '30 min', type: 'Mindfulness', category: 'mindful', image: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=240&fit=crop' },
+  { title: 'Wind down yoga', duration: '15 min', type: 'Yoga', category: 'mindful', image: 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=400&h=240&fit=crop' },
+  { title: 'Rain & thunder sounds', duration: '45 min', type: 'Mindfulness', category: 'mindful', image: 'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=400&h=240&fit=crop' },
+  { title: 'Body scan for sleep', duration: '20 min', type: 'Mindfulness', category: 'mindful', image: 'https://images.unsplash.com/photo-1499750310107-5fef28a66643?w=400&h=240&fit=crop' },
 ];
 
 const STRESS_ITEMS = [
   { title: 'How to calm down', duration: '5 min', type: 'Mindfulness', category: 'mindful', image: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=400&h=240&fit=crop' },
   { title: '2-minute breathing', duration: '2 min', type: 'Mindfulness', category: 'mindful', image: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&h=240&fit=crop' },
   { title: 'Quick stress relief', duration: '10 min', type: 'Mindfulness', category: 'mindful', image: 'https://images.unsplash.com/photo-1545205597-3d9d02c29597?w=400&h=240&fit=crop' },
+  { title: 'Anxiety relief meditation', duration: '12 min', type: 'Mindfulness', category: 'mindful', image: 'https://images.unsplash.com/photo-1506126613408-eca07ce68773?w=400&h=240&fit=crop' },
+  { title: 'Office stretch break', duration: '7 min', type: 'Stretch', category: 'mindful', image: 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=400&h=240&fit=crop' },
+  { title: 'Evening gratitude', duration: '8 min', type: 'Mindfulness', category: 'mindful', image: 'https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=400&h=240&fit=crop' },
 ];
 
 const FITNESS_ITEMS = [
-  { title: 'Wheelchair med ball cardio', duration: '18 min', type: 'Workout', category: 'cardio', image: 'https://tse1.mm.bing.net/th/id/OIP.vbVq3bGXq_IcmozP-IEikgHaEK?pid=Api&P=0&h=180' },
+  { title: 'Wheelchair med ball cardio', duration: '18 min', type: 'Workout', category: 'cardio', image: 'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=400&h=240&fit=crop' },
   { title: 'Peloton: Full body strength', duration: '20 min', type: 'Workout', category: 'strength', image: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=400&h=240&fit=crop' },
   { title: 'Yoga for beginners', duration: '25 min', type: 'Yoga', category: 'yoga', image: 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=400&h=240&fit=crop' },
+  { title: '5K run training', duration: '35 min', type: 'Workout', category: 'running', image: 'https://images.unsplash.com/photo-1571008887538-b36bb32f4571?w=400&h=240&fit=crop' },
+  { title: 'Lower body strength', duration: '28 min', type: 'Workout', category: 'strength', image: 'https://images.unsplash.com/photo-1434682881908-b43d0467b798?w=400&h=240&fit=crop' },
+  { title: 'HIIT cardio blast', duration: '15 min', type: 'Workout', category: 'cardio', image: 'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=400&h=240&fit=crop' },
+  { title: 'Vinyasa flow', duration: '40 min', type: 'Yoga', category: 'yoga', image: 'https://images.unsplash.com/photo-1545205597-3d9d02c29597?w=400&h=240&fit=crop' },
+  { title: 'Pilates core', duration: '22 min', type: 'Pilates', category: 'strength', image: 'https://images.unsplash.com/photo-1518611012118-696072aa579a?w=400&h=240&fit=crop' },
+  { title: 'Mobility & flexibility', duration: '20 min', type: 'Recovery', category: 'mobility', image: 'https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?w=400&h=240&fit=crop' },
+  { title: 'Treadmill intervals', duration: '25 min', type: 'Workout', category: 'running', image: 'https://images.unsplash.com/photo-1534258936925-c58bed479fcb?w=400&h=240&fit=crop' },
+  { title: 'Dumbbell upper body', duration: '30 min', type: 'Workout', category: 'strength', image: 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?w=400&h=240&fit=crop' },
+  { title: 'Restorative yoga', duration: '30 min', type: 'Yoga', category: 'yoga', image: 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=400&h=240&fit=crop' },
 ];
 
 const INSTRUCTORS = [

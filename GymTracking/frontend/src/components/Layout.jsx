@@ -16,7 +16,7 @@ function Layout({ children }) {
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) return;
-    const protectedPaths = ['/today', '/workout', '/coach', '/stats', '/profile', '/nutrition', '/sleep', '/history', '/settings'];
+    const protectedPaths = ['/today', '/workout', '/coach', '/stats', '/profile', '/nutrition', '/sleep', '/history', '/settings', '/water'];
     if (protectedPaths.includes(location.pathname)) fetchUser();
   }, [location.pathname, fetchUser]);
 
@@ -29,6 +29,7 @@ function Layout({ children }) {
     '/sleep': 'Giấc ngủ',
     '/history': 'Lịch sử',
     '/settings': 'Cài đặt',
+    '/water': 'Nước',
   };
   const pageTitle = pageTitles[location.pathname] ?? 'Today';
 
@@ -50,7 +51,8 @@ function Layout({ children }) {
   };
 
   const fabActions = [
-    { to: '/today', label: 'Thêm nước / Xem hôm nay', icon: 'bi-droplet-half' },
+    { to: '/today', label: 'Xem hôm nay', icon: 'bi-house-door' },
+    { to: '/water', label: 'Thêm nước', icon: 'bi-droplet-half' },
     { to: '/nutrition', label: 'Thêm bữa ăn', icon: 'bi-egg-fried' },
     { to: '/sleep', label: 'Log giấc ngủ', icon: 'bi-moon-stars' },
     { to: '/workout', label: 'Đánh dấu đã tập', icon: 'bi-lightning' },
@@ -77,6 +79,9 @@ function Layout({ children }) {
           </NavLink>
           <NavLink to="/nutrition" className={({ isActive }) => (isActive ? 'active-link' : '')} title="Dinh dưỡng">
             <i className="bi bi-egg-fried" />
+          </NavLink>
+          <NavLink to="/water" className={({ isActive }) => (isActive ? 'active-link' : '')} title="Nước">
+            <i className="bi bi-droplet-half" />
           </NavLink>
           <NavLink to="/sleep" className={({ isActive }) => (isActive ? 'active-link' : '')} title="Giấc ngủ">
             <i className="bi bi-moon-stars" />
@@ -108,7 +113,7 @@ function Layout({ children }) {
           </div>
         </header>
 
-        <div className={`content-area ${['/today', '/workout', '/coach', '/stats', '/profile', '/nutrition', '/sleep', '/history'].includes(location.pathname) ? 'content-area--wide' : ''}`}>
+        <div className={`content-area ${['/today', '/workout', '/coach', '/stats', '/profile', '/nutrition', '/sleep', '/history', '/water'].includes(location.pathname) ? 'content-area--wide' : ''}`}>
           {children}
         </div>
 

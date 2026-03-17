@@ -321,6 +321,28 @@ button.fitbit-card-icon:hover { opacity: 0.9; }
   color: #fff;
 }
 .workout-timer .btn { padding: 12px 20px; border-radius: 10px; font-weight: 600; font-size: 1rem; }
+.workout-timer-hint { font-size: 0.8rem; color: var(--fitbit-muted); margin: 10px 0 0; }
+.workout-timer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+.workout-timer-btn {
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  padding: 10px 14px;
+}
+.workout-timer-actions .btn-outline-light {
+  border-color: rgba(255,255,255,0.35);
+  color: #fff;
+}
+.workout-timer-actions .btn-outline-light:hover {
+  background: rgba(255,255,255,0.1);
+  border-color: rgba(255,255,255,0.5);
+  color: #fff;
+}
 
 .card-dark { background: var(--fitbit-card) !important; color: #fff; border: none; }
 .card-dark .text-muted { color: var(--fitbit-muted) !important; }
@@ -338,7 +360,8 @@ button.fitbit-card-icon:hover { opacity: 0.9; }
 /* Full-width pages (Nutrition, Sleep, History) – same layout as Stats, scroll when overflow */
 .nutrition-page,
 .sleep-page,
-.history-page {
+.history-page,
+.water-page {
   padding: 0 0 32px;
   width: 100%;
   max-width: 100%;
@@ -353,9 +376,30 @@ button.fitbit-card-icon:hover { opacity: 0.9; }
 }
 .nutrition-page .today-sections,
 .sleep-page .today-sections,
-.history-page .today-sections {
+.history-page .today-sections,
+.water-page .today-sections {
   width: 100%;
   max-width: 100%;
+}
+.water-progress-wrap {
+  margin-top: 12px;
+  height: 10px;
+  background: var(--fitbit-surface);
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+}
+.water-progress-bar {
+  height: 100%;
+  background: var(--fitbit-teal);
+  border-radius: 6px;
+  transition: width 0.3s ease;
+}
+.water-progress-label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--fitbit-muted);
+  margin-top: 6px;
 }
 .stats-row { display: grid; gap: 16px; margin-bottom: 16px; width: 100%; }
 .stats-row--top { grid-template-columns: 1fr minmax(280px, 360px); align-items: stretch; }
@@ -614,7 +658,12 @@ button.fitbit-card-icon:hover { opacity: 0.9; }
   background: none; border: none; color: var(--fitbit-teal); font-size: 0.875rem; font-weight: 600;
   cursor: pointer; padding: 4px 0;
 }
-.coach-card-row { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 10px; scroll-snap-type: x mandatory; }
+.coach-card-row {
+  display: flex; gap: 16px; overflow-x: auto; overflow-y: hidden;
+  padding-bottom: 8px; scroll-snap-type: x mandatory; scroll-behavior: smooth;
+  scrollbar-width: none; -ms-overflow-style: none;
+}
+.coach-card-row::-webkit-scrollbar { display: none; }
 .coach-card {
   flex: 0 0 280px; scroll-snap-align: start; border-radius: var(--radius);
   background: var(--fitbit-card); transition: transform 0.2s;

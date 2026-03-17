@@ -13,6 +13,7 @@ import Nutrition from './pages/Nutrition';
 import Sleep from './pages/Sleep';
 import Settings from './pages/Settings';
 import History from './pages/History';
+import Water from './pages/Water';
 
 function App() {
   return (
@@ -66,6 +67,14 @@ function App() {
           element={
             <ProtectedRoute>
               <Layout><Nutrition /></Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/water"
+          element={
+            <ProtectedRoute>
+              <Layout><Water /></Layout>
             </ProtectedRoute>
           }
         />
