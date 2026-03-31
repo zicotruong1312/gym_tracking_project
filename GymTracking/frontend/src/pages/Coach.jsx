@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import coachService from '../services/coachService';
 import userService from '../services/userService';
 import { useUser } from '../context/UserContext';
+import workoutService from '../services/workoutService';
 
 const COPIES = 3;
 
@@ -15,7 +16,6 @@ const FILTERS = [
   { id: 'mobility', label: 'Mobility & recovery', icon: 'bi bi-arrow-repeat' },
   { id: 'recipes', label: 'Recipes', icon: 'bi bi-egg-fried' },
   { id: 'new', label: 'New', icon: 'bi bi-stars' },
-  { id: 'available', label: 'Available to you', icon: 'bi bi-unlock' },
   { id: 'favorites', label: 'Favorites', icon: 'bi bi-heart-fill' },
 ];
 
@@ -97,7 +97,7 @@ function filterItems(items, filterId, query) {
 function CoachCard({ item, onClickPlay, isFavorite, onToggleFavorite }) {
   return (
     <div className="coach-card">
-      <div className="coach-card-image-wrap" onClick={() => onClickPlay(item.videoUrl)}>
+      <div className="coach-card-image-wrap" onClick={() => onClickPlay(item)}>
         {onToggleFavorite && (
           <button 
             type="button"
@@ -125,6 +125,9 @@ function CoachCard({ item, onClickPlay, isFavorite, onToggleFavorite }) {
         <i className="bi bi-headphones me-1" />
         {item.duration} · {item.type}
       </p>
+      <p className="coach-card-meta" style={{ paddingTop: 0 }}>
+        {item.viewsCount ?? 0} lượt xem · {item.likesCount ?? 0} thích
+      </p>
     </div>
   );
 }
@@ -133,13 +136,21 @@ function Coach() {
   const { user, setUser } = useUser();
   const [classes, setClasses] = useState([]);
   const [instructors, setInstructors] = useState([]);
-  const [brands, setBrands] = useState([]);
   
   const [activeFilter, setActiveFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [seeAllModal, setSeeAllModal] = useState(null);
   const [playingVideo, setPlayingVideo] = useState(null);
+  const [playingClass, setPlayingClass] = useState(null);
+  const [exerciseDetailsLoading, setExerciseDetailsLoading] = useState(false);
+  const [exerciseDetails, setExerciseDetails] = useState([]);
   const [favoriteIds, setFavoriteIds] = useState([]);
+
+  // Video tracking (views + watch time + likes)
+  const videoStartMsRef = useRef(null);
+  const videoClassIdRef = useRef(null);
+  const viewedForOpenRef = useRef(false);
+  const watchSentForOpenRef = useRef(false);
 
   // Instructor detail modal
   const [selectedInstructor, setSelectedInstructor] = useState(null);
@@ -147,14 +158,11 @@ function Coach() {
   const [loadingInstructorClasses, setLoadingInstructorClasses] = useState(false);
 
   const instructorsCarouselRef = useRef(null);
-  const brandsCarouselRef = useRef(null);
   const instructorsJumpingRef = useRef(false);
-  const brandsJumpingRef = useRef(false);
 
   useEffect(() => {
     coachService.getClasses().then(res => setClasses(res.data.data)).catch(console.error);
     coachService.getInstructors().then(res => setInstructors(res.data.data)).catch(console.error);
-    coachService.getBrands().then(res => setBrands(res.data.data)).catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -189,8 +197,9 @@ function Coach() {
       return;
     }
     try {
+      const alreadyFav = favoriteIds.includes(classId);
       let newFavs;
-      if (favoriteIds.includes(classId)) {
+      if (alreadyFav) {
         newFavs = favoriteIds.filter(id => id !== classId);
       } else {
         newFavs = [...favoriteIds, classId];
@@ -198,6 +207,11 @@ function Coach() {
       setFavoriteIds(newFavs); // Optimistic UI update
       setUser({ ...user, favoriteCoachClasses: newFavs }); // Optimistic context update
       await userService.updateProfile({ favoriteCoachClasses: newFavs });
+
+      // Treat "favorite on" as "like" (global likesCount)
+      if (!alreadyFav) {
+        coachService.markClassLiked(classId).catch(() => {});
+      }
     } catch (err) {
       console.error("Lỗi khi lưu danh sách yêu thích:", err);
     }
@@ -253,44 +267,142 @@ function Coach() {
     };
   }, [instructors.length]);
 
-  useEffect(() => {
-    const el = brandsCarouselRef.current;
-    if (!el || brands.length === 0) return;
-    const init = () => {
-      const oneCopy = el.scrollWidth / COPIES;
-      if (oneCopy <= 0) return;
-      brandsJumpingRef.current = true;
-      el.scrollLeft = oneCopy;
-      brandsJumpingRef.current = false;
-    };
-    init();
-    const raf = requestAnimationFrame(init);
-    const cleanup = setupInfiniteScroll(brandsCarouselRef, brandsJumpingRef);
-    return () => {
-      cancelAnimationFrame(raf);
-      if (cleanup) cleanup();
-    };
-  }, [brands.length]);
+  const classesSorted = Array.isArray(classes)
+    ? [...classes].sort((a, b) => {
+      const likesA = a?.likesCount ?? 0;
+      const likesB = b?.likesCount ?? 0;
+      const viewsA = a?.viewsCount ?? 0;
+      const viewsB = b?.viewsCount ?? 0;
+      // Ưu tiên likes, sau đó views
+      return likesB - likesA || viewsB - viewsA;
+    })
+    : [];
 
-  const pelotonItems = classes.filter(c => c.section === 'Peloton');
-  const sleepItems = classes.filter(c => c.section === 'Sleep');
-  const stressItems = classes.filter(c => c.section === 'Stress');
-  const fitnessItems = classes.filter(c => c.section === 'Fitness');
+  const pelotonItems = classesSorted.filter(c => c.section === 'Peloton');
+  const sleepItems = classesSorted.filter(c => c.section === 'Sleep');
+  const stressItems = classesSorted.filter(c => c.section === 'Stress');
+  const fitnessItems = classesSorted.filter(c => c.section === 'Fitness');
 
   const pelotonFiltered = filterItems(pelotonItems, activeFilter, searchQuery);
   const sleepFiltered = filterItems(sleepItems, activeFilter, searchQuery);
   const stressFiltered = filterItems(stressItems, activeFilter, searchQuery);
   const fitnessFiltered = filterItems(fitnessItems, activeFilter, searchQuery);
 
-  const favoriteItemsList = filterItems(classes.filter(c => favoriteIds.includes(c._id)), 'all', searchQuery);
+  const favoriteItemsList = filterItems(classesSorted.filter(c => favoriteIds.includes(c._id)), 'all', searchQuery);
 
-  const handlePlayVideo = (url) => {
+  const handlePlayVideo = (coachClass) => {
+    const url = coachClass?.videoUrl;
     if (url) {
       setPlayingVideo(url);
+      setPlayingClass(coachClass || null);
+
+      // Reset tracking for this open
+      videoStartMsRef.current = Date.now();
+      videoClassIdRef.current = coachClass?._id || null;
+      viewedForOpenRef.current = false;
+      watchSentForOpenRef.current = false;
+
+      if (coachClass?._id) {
+        coachService.markClassViewed(coachClass._id).catch(() => {});
+        viewedForOpenRef.current = true;
+      }
     } else {
-      alert("Video này chưa có liên kết hướng dẫn!");
+      alert('Video này chưa có liên kết hướng dẫn!');
     }
   };
+
+  const closeVideoModal = async () => {
+    const classId = videoClassIdRef.current;
+    const startMs = videoStartMsRef.current;
+    if (classId && startMs && !watchSentForOpenRef.current) {
+      watchSentForOpenRef.current = true;
+      const seconds = Math.max(0, Math.round((Date.now() - startMs) / 1000));
+      try {
+        await coachService.addClassWatchSeconds(classId, seconds);
+      } catch {
+        // Best-effort analytics; ignore failures
+      }
+    }
+
+    setPlayingVideo(null);
+    setPlayingClass(null);
+    setExerciseDetails([]);
+  };
+
+  const targetMusclesToRegions = (targetMuscles) => {
+    const ms = Array.isArray(targetMuscles) ? targetMuscles : [];
+    const regions = [];
+
+    if (ms.includes('chest')) regions.push('Ngực');
+    if (ms.some((m) => ['upper-back', 'lower-back', 'trapezius', 'back-deltoids'].includes(m))) regions.push('Lưng');
+    if (ms.includes('front-deltoids') || ms.includes('trapezius')) regions.push('Vai');
+    if (ms.some((m) => ['quadriceps', 'hamstring', 'calves', 'gluteal', 'adductor', 'abductors'].includes(m))) regions.push('Chân');
+    if (ms.some((m) => ['biceps', 'triceps', 'forearm'].includes(m))) regions.push('Tay');
+    if (ms.some((m) => ['abs', 'obliques'].includes(m))) regions.push('Bụng');
+
+    return regions.length ? Array.from(new Set(regions)) : ['—'];
+  };
+
+  const getQuickSteps = (ex) => {
+    const t = ex?.type || 'Strength';
+    const regions = targetMusclesToRegions(ex?.targetMuscles);
+    const steps = [];
+
+    // Nhắc nguyên tắc chung
+    steps.push('Khởi động 3–5 phút trước khi vào hiệp.');
+    steps.push('Giữ form chuẩn, không giật; dừng nếu đau nhói.');
+
+    if (t === 'Cardio') {
+      steps.push('Bắt đầu chậm → tăng dần nhịp đến mức vừa (RPE ~6–7/10).');
+      steps.push('Kết thúc giảm tốc 2–3 phút để hạ nhịp.');
+      return steps;
+    }
+
+    if (t === 'Mobility') {
+      steps.push('Thực hiện chậm; mỗi động tác giữ 20–30 giây.');
+      steps.push('Ưu tiên cảm giác căng cơ vừa phải, không ép đau.');
+      return steps;
+    }
+
+    // Strength / Hypertrophy
+    if (regions.includes('Ngực')) steps.push('Siết core nhẹ, kéo vai về sau để mở ngực.');
+    if (regions.includes('Lưng')) steps.push('Kéo xương bả vai về sau; tránh gù lưng.');
+    if (regions.includes('Chân')) steps.push('Đầu gối theo hướng mũi chân; hạ sâu vừa khả năng.');
+    if (regions.includes('Bụng')) steps.push('Siết bụng (core) trong suốt hiệp, thở đều.');
+    if (regions.includes('Tay')) steps.push('Cổ tay thẳng, kiểm soát đường đi; tránh mỏi cổ tay.');
+    if (regions.includes('Vai')) steps.push('Giữ vai “hạ xuống”, tránh nhún vai quá mức.');
+
+    steps.push('Thở: lên/đẩy thì thở ra; xuống/hạ thì hít vào.');
+    steps.push('Nghỉ theo restSeconds để giữ chất lượng hiệp tiếp theo.');
+    return steps;
+  };
+
+  // Load chi tiết bài tập (từ Exercise) tương ứng với loại lớp đang xem.
+  useEffect(() => {
+    if (!playingClass) return;
+    setExerciseDetailsLoading(true);
+    setExerciseDetails([]);
+
+    const mapCoachCategoryToExerciseType = (category) => {
+      const c = String(category || '').toLowerCase();
+      if (c === 'cardio' || c === 'running' || c === 'peloton') return 'Cardio';
+      if (c === 'mobility' || c === 'yoga') return 'Mobility';
+      if (c === 'strength') return 'Strength';
+      // fallback
+      return 'Strength';
+    };
+
+    const exerciseType = mapCoachCategoryToExerciseType(playingClass.category);
+
+    workoutService
+      .getExercises({ type: exerciseType })
+      .then((res) => {
+        const list = res.data?.data || [];
+        setExerciseDetails(list.slice(0, 5));
+      })
+      .catch(() => setExerciseDetails([]))
+      .finally(() => setExerciseDetailsLoading(false));
+  }, [playingClass]);
 
   return (
     <div className="coach-page">
@@ -400,39 +512,13 @@ function Coach() {
         </div>
       </section>
 
-      <section className="coach-section">
-        <div className="coach-section-header">
-          <h2 className="coach-section-title">Thương hiệu</h2>
-          <button type="button" className="coach-see-all" onClick={() => setSeeAllModal('brands')}>Xem tất cả</button>
-        </div>
-        <div className="coach-carousel-wrap">
-          <button type="button" className="coach-carousel-btn coach-carousel-btn--prev" onClick={() => carouselPrev(brandsCarouselRef)} aria-label="Trước">
-            <i className="bi bi-chevron-left" />
-          </button>
-          <div ref={brandsCarouselRef} className="coach-brand-row coach-carousel-track">
-            {brands.length > 0 && Array.from({ length: COPIES }, (_, copy) =>
-              brands.map((b, i) => (
-                <button key={`brand-${copy}-${b._id || i}`} type="button" className="coach-brand-card">
-                  <i className={`bi ${b.icon} coach-brand-icon`} />
-                  <span className="coach-brand-name">{b.name}</span>
-                </button>
-              ))
-            )}
-          </div>
-          <button type="button" className="coach-carousel-btn coach-carousel-btn--next" onClick={() => carouselNext(brandsCarouselRef)} aria-label="Sau">
-            <i className="bi bi-chevron-right" />
-          </button>
-        </div>
-      </section>
-
-      {/* SEE ALL MODAL (Instructors/Brands/Classes) */}
+      {/* SEE ALL MODAL (Instructors/Classes) */}
       {seeAllModal && (
         <div className="coach-modal-overlay" onClick={() => setSeeAllModal(null)} role="presentation">
           <div className="coach-modal" onClick={(e) => e.stopPropagation()}>
             <div className="coach-modal-header">
               <h3 className="coach-modal-title">
                 {seeAllModal === 'instructors' && 'Huấn luyện viên'}
-                {seeAllModal === 'brands' && 'Thương hiệu'}
                 {seeAllModal === 'Peloton' && 'Lớp Peloton'}
                 {seeAllModal === 'Sleep' && 'Ngủ ngon hơn'}
                 {seeAllModal === 'Stress' && 'Giảm căng thẳng'}
@@ -459,16 +545,6 @@ function Coach() {
                       <p className="coach-instructor-name">{inst.name}</p>
                       <p className="coach-instructor-role">{inst.role}</p>
                     </div>
-                  ))}
-                </div>
-              )}
-              {seeAllModal === 'brands' && (
-                <div className="coach-modal-brands">
-                  {brands.map((b, i) => (
-                    <button key={i} type="button" className="coach-brand-card">
-                      <i className={`bi ${b.icon} coach-brand-icon`} />
-                      <span className="coach-brand-name">{b.name}</span>
-                    </button>
                   ))}
                 </div>
               )}
@@ -546,22 +622,111 @@ function Coach() {
 
       {/* VIDEO PLAYER MODAL */}
       {playingVideo && (
-        <div className="coach-modal-overlay" style={{ zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center' }} onClick={() => setPlayingVideo(null)} role="presentation">
-          <div className="coach-video-modal" style={{ width: '80%', maxWidth: '800px', background: '#000', borderRadius: '12px', overflow: 'hidden', position: 'relative' }} onClick={(e) => e.stopPropagation()}>
+        <div
+          className="coach-modal-overlay coach-video-overlay"
+          style={{
+            zIndex: 9999,
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'flex-start',
+            padding: '24px',
+            overflowY: 'auto',
+          }}
+          onClick={closeVideoModal}
+          role="presentation"
+        >
+          <div
+            className="coach-video-modal"
+            style={{
+              width: '80%',
+              maxWidth: '800px',
+              background: '#000',
+              borderRadius: '12px',
+              overflow: 'hidden',
+              position: 'relative',
+              display: 'flex',
+              flexDirection: 'column',
+              maxHeight: '85vh',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <button type="button" 
-              onClick={() => setPlayingVideo(null)} 
+              onClick={closeVideoModal}
               style={{ position: 'absolute', top: '10px', right: '10px', background: 'rgba(0,0,0,0.5)', border: 'none', color: '#fff', borderRadius: '50%', width: '36px', height: '36px', zIndex: 10 }}>
               <i className="bi bi-x-lg" />
             </button>
-            <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0 }}>
+            <div style={{ position: 'relative', width: '100%', height: '52vh', maxHeight: '520px', minHeight: '240px' }}>
               <iframe 
                 src={playingVideo.includes('youtube') && !playingVideo.includes('autoplay') ? `${playingVideo}?autoplay=1` : playingVideo} 
                 title="Video Player" 
-                style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }} 
+                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} 
                 frameBorder="0" 
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
                 allowFullScreen>
               </iframe>
+            </div>
+
+            <div
+              className="coach-video-detail-scroll"
+              style={{
+                padding: '16px 18px',
+                background: 'var(--fitbit-card)',
+                overflowY: 'auto',
+                flex: '1 1 auto',
+                minHeight: 0,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '10px' }}>
+                <h4 style={{ margin: 0, color: '#fff', fontSize: '1rem' }}>Chi tiết bài tập (theo lớp)</h4>
+                {playingClass && (
+                  <span style={{ color: 'var(--fitbit-muted)', fontSize: '0.8rem' }}>
+                    {playingClass.type}
+                    {` · ${playingClass.viewsCount ?? 0} views · ${playingClass.likesCount ?? 0} likes`}
+                  </span>
+                )}
+              </div>
+
+              {exerciseDetailsLoading ? (
+                <div style={{ color: 'var(--fitbit-muted)' }}>Đang tải chi tiết bài tập…</div>
+              ) : exerciseDetails.length ? (
+                <div className="coach-exercise-details">
+                  {exerciseDetails.map((ex) => {
+                    const regions = targetMusclesToRegions(ex.targetMuscles);
+                    const sets = ex.defaultSets ?? 3;
+                    const repsMin = ex.defaultRepsMin ?? 8;
+                    const repsMax = ex.defaultRepsMax ?? 12;
+                    const rest = ex.restSeconds ?? 90;
+                    const calPerSet = ex.caloriesPerSet ?? 15;
+                    const totalCal = calPerSet * sets;
+
+                    return (
+                      <div key={ex._id} className="coach-exercise-detail-item">
+                        <div className="coach-exercise-detail-title">{ex.name}</div>
+                        <div className="coach-exercise-detail-regions">Vị trí: {regions.join(', ')}</div>
+                        <div className="coach-exercise-detail-meta">
+                          {sets} sets · {repsMin}-{repsMax} reps · nghỉ {rest}s
+                        </div>
+                        <div className="coach-exercise-detail-cals">
+                          {calPerSet} kcal/set · ~{totalCal} kcal
+                        </div>
+
+                        <div className="coach-exercise-detail-steps" style={{ marginTop: 10 }}>
+                          <div className="coach-exercise-detail-steps-title">Cách tập nhanh</div>
+                          <ul className="coach-exercise-detail-steps-list">
+                            {getQuickSteps(ex).map((s, idx) => (
+                              <li key={`${ex._id}-s-${idx}`}>{s}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ color: 'var(--fitbit-muted)' }}>
+                  Chưa có dữ liệu bài tập phù hợp. Bạn có thể thử lại sau khi seed Exercise.
+                </div>
+              )}
             </div>
           </div>
         </div>

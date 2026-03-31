@@ -1,16 +1,17 @@
-import axios from 'axios';
+import api from '../api/axios';
 
-const API_URL = 'http://localhost:5000/api/coach';
-
-const getClasses = () => axios.get(`${API_URL}/classes`);
-const getInstructors = () => axios.get(`${API_URL}/instructors`);
-const getBrands = () => axios.get(`${API_URL}/brands`);
-const getClassesByInstructor = (instructorId) => axios.get(`${API_URL}/classes/by-instructor/${instructorId}`);
+const getClasses = () => api.get('/coach/classes');
+const getInstructors = () => api.get('/coach/instructors');
+const getClassesByInstructor = (instructorId) => api.get(`/coach/classes/by-instructor/${instructorId}`);
+const markClassViewed = (classId) => api.post(`/coach/classes/${classId}/viewed`);
+const addClassWatchSeconds = (classId, seconds) => api.post(`/coach/classes/${classId}/watch`, { seconds });
+const markClassLiked = (classId) => api.post(`/coach/classes/${classId}/like`);
 
 export default {
   getClasses,
   getInstructors,
-  getBrands,
   getClassesByInstructor,
+  markClassViewed,
+  addClassWatchSeconds,
+  markClassLiked,
 };
-

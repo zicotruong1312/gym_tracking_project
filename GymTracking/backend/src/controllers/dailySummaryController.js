@@ -1,4 +1,5 @@
 const DailySummary = require('../models/DailySummary');
+const { emitToUser } = require('../utils/socketHub');
 
 const getStartOfDay = (date) => {
   const d = new Date(date);
@@ -39,6 +40,7 @@ const updateToday = async (req, res) => {
       updates,
       { new: true, upsert: true, runValidators: true }
     );
+    emitToUser(req.user._id, 'healthflow:update', { scope: 'dailySummary' });
     res.json(summary);
   } catch (error) {
     res.status(400).json({ message: error.message });

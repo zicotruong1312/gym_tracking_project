@@ -1,5 +1,6 @@
 const Nutrition = require('../models/Nutrition');
 const FoodItem = require('../models/FoodItem');
+const { emitToUser } = require('../utils/socketHub');
 
 // @desc    Lấy danh sách món ăn từ database chuẩn
 // @route   GET /api/nutrition/foods
@@ -61,6 +62,7 @@ exports.addMeal = async (req, res) => {
     });
 
     const savedNutrition = await nutrition.save();
+    emitToUser(req.user._id, 'healthflow:update', { scope: 'nutrition' });
     res.status(201).json({ success: true, data: savedNutrition });
   } catch (error) {
     console.error('Lỗi khi thêm bữa ăn:', error);
@@ -110,6 +112,7 @@ exports.deleteMeal = async (req, res) => {
     if (!meal) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy bữa ăn' });
     }
+    emitToUser(req.user._id, 'healthflow:update', { scope: 'nutrition' });
     res.status(200).json({ success: true, data: {} });
   } catch (error) {
     console.error('Lỗi khi xóa bữa ăn:', error);

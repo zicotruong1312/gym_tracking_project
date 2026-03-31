@@ -9,6 +9,11 @@ const coachClassSchema = new mongoose.Schema({
   image: { type: String, required: true },
   videoUrl: { type: String, default: '' },
   instructorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Instructor', default: null },
+  // Engagement (global across users)
+  viewsCount: { type: Number, default: 0 },
+  likesCount: { type: Number, default: 0 },
+  totalWatchSeconds: { type: Number, default: 0 },
+  watchEvents: { type: Number, default: 0 },
 }, { timestamps: true });
 
 module.exports = mongoose.model('CoachClass', coachClassSchema);

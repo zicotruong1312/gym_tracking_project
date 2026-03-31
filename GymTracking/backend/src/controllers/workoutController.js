@@ -1,6 +1,7 @@
 const Workout = require('../models/Workout');
 const Exercise = require('../models/Exercise');
 const DailySummary = require('../models/DailySummary');
+const { emitToUser } = require('../utils/socketHub');
 
 // @desc    Lưu lịch sử tập luyện
 // @route   POST /api/workouts
@@ -74,6 +75,7 @@ exports.createWorkout = async (req, res) => {
         summary.exercisedToday = true;
         await summary.save();
 
+        emitToUser(req.user._id, 'healthflow:update', { scope: 'workout' });
         res.status(201).json({ success: true, data: savedWorkout, caloriesBurned: totalCalories });
     } catch (error) {
         console.error('Lỗi khi tạo workout:', error);

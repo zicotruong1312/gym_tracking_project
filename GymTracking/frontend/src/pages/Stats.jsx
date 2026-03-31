@@ -42,6 +42,19 @@ function calcBmi(weightKg, heightCm) {
   return (weightKg / ((heightCm / 100) ** 2)).toFixed(1);
 }
 
+function getBmiCategory(bmiValue) {
+  const v = Number(bmiValue);
+  if (!Number.isFinite(v) || v <= 0) {
+    return { label: '—' };
+  }
+
+  // Adult BMI classification (WHO/CDC-like for adults)
+  if (v < 18.5) return { label: 'Gầy' };
+  if (v < 25) return { label: 'Bình thường' };
+  if (v < 30) return { label: 'Thừa cân' };
+  return { label: 'Béo phì' };
+}
+
 const BODY_COMP_LABELS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 
 function Stats() {
@@ -52,9 +65,11 @@ function Stats() {
   const [nutritionHistory, setNutritionHistory] = useState([]);
   const [muscleMapView, setMuscleMapView] = useState('anterior');
   const [chartPeriod, setChartPeriod] = useState('week');
+  const [showReportModal, setShowReportModal] = useState(false);
 
   // Smart Goal Planner States
   const [plannerOpen, setPlannerOpen] = useState(false);
+  const [plannerBusy, setPlannerBusy] = useState(false);
   const [goalParams, setGoalParams] = useState({ currentWeight: 70, targetWeight: 65, durationWeeks: 4 });
   const [plannerResult, setPlannerResult] = useState(null);
   const [plannerError, setPlannerError] = useState('');
@@ -177,6 +192,42 @@ function Stats() {
     { label: 'Fat (Chất béo)', value: totalFat, color: '#00B0B9' }, // fitbit-teal
   ];
 
+  // Text báo cáo (dựa theo biểu đồ) để người dùng không phải tự đọc chart.
+  const periodLabel = chartPeriod === 'week' ? '7 ngày qua' : '30 ngày qua';
+  const safeDaysCount = Math.max(1, daysCount);
+  const sumBurn = chartData.reduce((s, v) => s + (v || 0), 0);
+  const sumIntake = intakeData.reduce((s, v) => s + (v || 0), 0);
+  const avgBurn = Math.round(sumBurn / safeDaysCount);
+  const avgTargetBurn = targetBurnArray.length
+    ? Math.round(targetBurnArray.reduce((s, v) => s + (v || 0), 0) / Math.max(1, targetBurnArray.length))
+    : null;
+  const avgIntake = Math.round(sumIntake / safeDaysCount);
+  const overDays = intakeData.filter((v) => (v || 0) > targetCals).length;
+
+  // --- Dữ liệu dùng cho phần “text report” sâu hơn ---
+  const burnDiffs = chartData.map((v, i) => (v || 0) - (targetBurnArray[i] || 0));
+  const burnAchievedDays = burnDiffs.filter((d) => d >= 0).length;
+  const burnNotAchievedDays = Math.max(0, safeDaysCount - burnAchievedDays);
+
+  const intakeDiffs = intakeData.map((v) => (v || 0) - targetCals);
+  const withinIntakeRangeDays = intakeData.filter((v) => Math.abs((v || 0) - targetCals) <= 100).length;
+  const underDays = intakeData.filter((v) => (v || 0) > 0 && (v || 0) < targetCals - 100).length;
+  const bothAchievedDays = chartData.reduce((acc, burned, i) => {
+    const okBurn = (burned || 0) >= (targetBurnArray[i] || 0);
+    const okIntake = Math.abs((intakeData[i] || 0) - targetCals) <= 100;
+    return acc + (okBurn && okIntake ? 1 : 0);
+  }, 0);
+  const overallCompletionPct = Math.round((bothAchievedDays / safeDaysCount) * 100);
+
+  const bestBurnIdx = burnDiffs.reduce((best, d, i) => (d > burnDiffs[best] ? i : best), 0);
+  const worstBurnIdx = burnDiffs.reduce((worst, d, i) => (d < burnDiffs[worst] ? i : worst), 0);
+  const bestIntakeIdx = intakeDiffs.reduce((best, d, i) => (Math.abs(d) < Math.abs(intakeDiffs[best]) ? i : best), 0);
+
+  const macroCaloriesTotal = (totalProtein * 4) + (totalCarbs * 4) + (totalFat * 9);
+  const proteinPct = macroCaloriesTotal > 0 ? Math.round((totalProtein * 4 / macroCaloriesTotal) * 100) : 0;
+  const carbsPct = macroCaloriesTotal > 0 ? Math.round((totalCarbs * 4 / macroCaloriesTotal) * 100) : 0;
+  const fatPct = macroCaloriesTotal > 0 ? Math.round((totalFat * 9 / macroCaloriesTotal) * 100) : 0;
+
   // Mục tiêu ngủ theo giới tính (phút)
   const targetSleepMins = user?.gender === 'female' ? 8 * 60 : 7 * 60;
 
@@ -209,7 +260,14 @@ function Stats() {
 
   const userStatsRows = [
     { icon: 'bi-person', label: 'Tên', value: user?.name ?? '—' },
-    { icon: 'bi-person-badge', label: 'BMI', value: bmi ?? '—' },
+    {
+      icon: 'bi-person-badge',
+      label: 'BMI',
+      value:
+        bmi != null
+          ? `${bmi} · ${getBmiCategory(bmi).label}`
+          : '—',
+    },
     { icon: 'bi-rulers', label: 'Chiều cao', value: height != null ? `${height} cm` : '—' },
     { icon: 'bi-speedometer2', label: 'Cân nặng', value: weight != null ? `${weight} kg` : '—' },
     { icon: 'bi-bullseye', label: 'Mục tiêu cân nặng', value: targetWeight != null ? `${targetWeight} kg` : '—' },
@@ -441,17 +499,24 @@ function Stats() {
   }, [nutritionHistory]);
 
   const calculateSmartGoal = async () => {
-    const { currentWeight, targetWeight, durationWeeks } = goalParams;
-    const diff = currentWeight - targetWeight;
-    if (diff <= 0) return setPlannerError('Cân nặng mục tiêu phải nhỏ hơn cân nặng hiện tại.');
-    const safeMaxLoss = currentWeight * 0.01;
-    const reqLoss = diff / durationWeeks;
-    if (reqLoss > safeMaxLoss) {
+    if (plannerBusy) return;
+    setPlannerBusy(true);
+    try {
+      const { currentWeight, targetWeight, durationWeeks } = goalParams;
+      const diff = currentWeight - targetWeight;
+      if (diff <= 0) {
+        setPlannerError('Cân nặng mục tiêu phải nhỏ hơn cân nặng hiện tại.');
+        return;
+      }
+      const safeMaxLoss = currentWeight * 0.01;
+      const reqLoss = diff / durationWeeks;
+      if (reqLoss > safeMaxLoss) {
+        setPlannerResult(null);
+        setPlannerError(`Tốc độ không an toàn! Tối đa ${safeMaxLoss.toFixed(1)}kg/tuần → cần tối thiểu ${Math.ceil(diff / safeMaxLoss)} tuần.`);
+        return;
+      }
+      setPlannerError('');
       setPlannerResult(null);
-      return setPlannerError(`Tốc độ không an toàn! Tối đa ${safeMaxLoss.toFixed(1)}kg/tuần → cần tối thiểu ${Math.ceil(diff / safeMaxLoss)} tuần.`);
-    }
-    setPlannerError('');
-    setPlannerResult(null);
 
     // Tính các chỉ tiêu cơ bản
     const totalKcalDeficit = diff * 7700;                                   // kcal cần đốt tổng
@@ -467,7 +532,10 @@ function Stats() {
     } catch {
       return setPlannerError('Không lấy được dữ liệu bài tập. Kiểm tra kết nối server.');
     }
-    if (allExercises.length === 0) return setPlannerError('Chưa có bài tập trong cơ sở dữ liệu.');
+    if (allExercises.length === 0) {
+      setPlannerError('Chưa có bài tập trong cơ sở dữ liệu.');
+      return;
+    }
 
     // Nhóm bài tập theo nhóm cơ – 6 nhóm bắt buộc
     const REQUIRED_GROUPS = ['Ngực', 'Lưng', 'Vai', 'Chân', 'Tay', 'Bụng'];
@@ -540,6 +608,11 @@ function Stats() {
     const water = ((currentWeight * 35 + (dailyDeficit > 300 ? 500 : 0)) / 1000).toFixed(1);
 
     setPlannerResult({ dailyDeficit, dailyIntake, freq, water, exercises: selected, totalBurn });
+    } catch {
+      setPlannerError('Phân tích lộ trình thất bại. Vui lòng thử lại.');
+    } finally {
+      setPlannerBusy(false);
+    }
   };
 
 
@@ -714,6 +787,18 @@ function Stats() {
               </div>
             ))}
           </div>
+
+          <div className="stats-user-report">
+            <button
+               type="button"
+               className="btn btn-fitbit w-100"
+               style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', fontSize: '0.95rem' }}
+               onClick={() => setShowReportModal(true)}
+            >
+               <span>Xem báo cáo chi tiết Năng lượng & Dinh dưỡng</span>
+               <i className="bi bi-journal-text" style={{ fontSize: '1.3rem' }}></i>
+            </button>
+          </div>
         </div>
 
         <div className="stats-muscle-card fitbit-card">
@@ -873,7 +958,14 @@ function Stats() {
                     <input type="number" className="form-control bg-dark text-light border-secondary" value={goalParams.durationWeeks} min="1" onChange={e => setGoalParams({ ...goalParams, durationWeeks: Number(e.target.value) })} />
                   </div>
                 </div>
-                <button type="button" className="btn btn-outline-fitbit w-100 mb-3" onClick={calculateSmartGoal}>Phân tích Lộ trình</button>
+                <button
+                  type="button"
+                  className="btn btn-outline-fitbit w-100 mb-3"
+                  onClick={calculateSmartGoal}
+                  disabled={plannerBusy}
+                >
+                  {plannerBusy ? 'Đang phân tích...' : 'Phân tích Lộ trình'}
+                </button>
                 {plannerError && (
                   <div className="alert alert-danger bg-danger text-white border-0 py-2 px-3 small">
                     <i className="bi bi-exclamation-triangle-fill me-2" />{plannerError}
@@ -960,6 +1052,64 @@ function Stats() {
           </div>
         </div>
       )}
+      {showReportModal && (
+        <div className="coach-modal-overlay" style={{ zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center' }} onClick={() => setShowReportModal(false)}>
+          <div className="coach-modal" style={{ width: '90%', maxWidth: '600px', background: 'var(--fitbit-card)', borderRadius: '16px', padding: '24px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ margin: 0, color: 'var(--fitbit-teal)' }}><i className="bi bi-journal-text me-2"></i>Báo cáo tiến độ</h3>
+              <button type="button" onClick={() => setShowReportModal(false)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '1.5rem', cursor: 'pointer' }}>
+                <i className="bi bi-x" />
+              </button>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '0.95rem', lineHeight: 1.6, color: '#fff' }}>
+              <div style={{ background: 'rgba(255,255,255,0.03)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <h4 style={{ color: 'var(--fitbit-teal)', fontSize: '1.05rem', margin: '0 0 8px 0' }}><i className="bi bi-fire me-2"></i>Năng lượng đốt cháy</h4>
+                <p style={{ margin: 0 }}>
+                  {periodLabel}, bạn đốt trung bình <strong>{avgBurn} kcal/ngày</strong> ({burnAchievedDays}/{safeDaysCount} ngày bám mục tiêu).<br/>
+                  {avgTargetBurn != null ? (
+                    avgBurn >= avgTargetBurn ? <span style={{color: '#22c55e'}}>✓ Bạn đang bám mục tiêu đốt.</span> : <span style={{color: '#f97316'}}>! Bạn chưa đạt mục tiêu đốt.</span>
+                  ) : null}<br/>
+                  Cao nhất vào <strong>{chartLabels[bestBurnIdx]}</strong>, thấp nhất vào <strong>{chartLabels[worstBurnIdx]}</strong>.
+                </p>
+              </div>
+
+              <div style={{ background: 'rgba(255,255,255,0.03)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <h4 style={{ color: 'var(--fitbit-teal)', fontSize: '1.05rem', margin: '0 0 8px 0' }}><i className="bi bi-egg-fried me-2"></i>Dinh dưỡng nạp vào</h4>
+                <p style={{ margin: 0 }}>
+                  Trung bình <strong>{avgIntake} kcal/ngày</strong>. Có <strong>{withinIntakeRangeDays}/{safeDaysCount}</strong> ngày nạp sát hạn mức (±100 kcal).<br/>
+                  <strong>{overDays}</strong> ngày vượt hạn mức, <strong>{underDays}</strong> ngày thiếu.<br/>
+                  Gần mục tiêu nhất vào: <strong>{chartLabels[bestIntakeIdx]}</strong>.
+                </p>
+              </div>
+
+              <div style={{ background: 'rgba(255,255,255,0.03)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <h4 style={{ color: '#eab308', fontSize: '1.05rem', margin: '0 0 8px 0' }}><i className="bi bi-pie-chart me-2"></i>Cân bằng Đa lượng (Macros)</h4>
+                <p style={{ margin: 0 }}>
+                  Protein {proteinPct}%, Carbs {carbsPct}%, Fat {fatPct}% (tính theo kcal).<br/>
+                  <span style={{ color: 'var(--fitbit-muted)' }}>
+                    {proteinPct < 35
+                      ? 'Đạm đang hơi thấp—tăng protein để cơ bắp phục hồi tốt hơn.'
+                      : proteinPct > 50
+                        ? 'Đạm khá cao—hãy giữ mức cân đối để tối ưu năng lượng.'
+                        : 'Lượng đạm ở mức ổn định—tiếp tục phát huy.'}
+                  </span>
+                </p>
+              </div>
+
+              <div style={{ background: 'rgba(0,176,185,0.1)', padding: '16px', borderRadius: '12px', border: '1px solid var(--fitbit-teal)' }}>
+                <h4 style={{ color: 'var(--fitbit-teal)', fontSize: '1.05rem', margin: '0 0 8px 0' }}><i className="bi bi-bullseye me-2"></i>Tiến độ tổng thể</h4>
+                <p style={{ margin: 0 }}>
+                  Bạn có <strong>{overallCompletionPct}%</strong> số ngày đạt ĐỒNG THỜI cả hai mục tiêu năng lượng (đốt đủ và ăn sát chuẩn).
+                </p>
+              </div>
+            </div>
+
+            <button className="btn btn-fitbit w-100 mt-4" onClick={() => setShowReportModal(false)}>Đóng</button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

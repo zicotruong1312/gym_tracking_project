@@ -3,6 +3,8 @@ import dailySummaryService from '../services/dailySummaryService';
 import nutritionService from '../services/nutritionService';
 import { useUser } from '../context/UserContext';
 import toast from 'react-hot-toast';
+import { calcSmartTargets } from '../utils/smartGoalCalc';
+import { sendChatMessage } from '../services/chatService';
 
 function Nutrition() {
   const { user } = useUser();
@@ -20,6 +22,24 @@ function Nutrition() {
   const [activeMealTab, setActiveMealTab] = useState('Breakfast');
   const [showAllLibrary, setShowAllLibrary] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('');
+  const [foodQuery, setFoodQuery] = useState('');
+  const [allFoods, setAllFoods] = useState([]);
+  const [allFoodsLoading, setAllFoodsLoading] = useState(true);
+
+  // Meal plan 7 ngày (gợi ý)
+  const [planBusy, setPlanBusy] = useState(false);
+  const [mealPlan7d, setMealPlan7d] = useState(null);
+
+  const [foodAiBusy, setFoodAiBusy] = useState(false);
+  const [foodSaving, setFoodSaving] = useState(false);
+
+  const getFoodImageSrc = (food) => {
+    if (food?.image) return food.image;
+    const cat = String(food?.category || 'Chung');
+    // Dùng lock theo category để placeholder ổn định, không random theo mỗi lần render
+    const lock = encodeURIComponent(`category-${cat}`);
+    return `https://loremflickr.com/400/300/food?lock=${lock}`;
+  };
 
   // History table states
   const [historyView, setHistoryView] = useState('week'); // 'week' | 'month'
@@ -53,9 +73,40 @@ function Nutrition() {
     rowRef.current.scrollLeft = scrollLeft.current - walk;
   };
 
+  // Load full thư viện món ăn 1 lần (đảm bảo "Xem tất cả" có đủ ~333 món)
   useEffect(() => {
-    nutritionService.getFoods('', selectedCategory).then(res => setLibraryFoods(res.data.data)).catch(console.error);
-  }, [selectedCategory]);
+    setAllFoodsLoading(true);
+    let mounted = true;
+    nutritionService
+      .getFoods('', '')
+      .then((res) => {
+        if (!mounted) return;
+        setAllFoods(res.data.data || []);
+      })
+      .catch(console.error)
+      .finally(() => {
+        if (!mounted) return;
+        setAllFoodsLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Lọc theo query/category trên bộ dữ liệu đã tải
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      const q = foodQuery.trim().toLowerCase();
+      const cat = selectedCategory;
+      const filtered = (allFoods || []).filter((f) => {
+        const matchesCategory = !cat || f.category === cat;
+        const matchesQuery = !q || (f.name || '').toLowerCase().includes(q) || (f.category || '').toLowerCase().includes(q);
+        return matchesCategory && matchesQuery;
+      });
+      setLibraryFoods(filtered);
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [foodQuery, selectedCategory, allFoods]);
 
   useEffect(() => {
     nutritionService.getFoods('', 'Cá nhân').then(res => setQuickMeals(res.data.data)).catch(console.error);
@@ -63,8 +114,13 @@ function Nutrition() {
 
   const handleCreateFood = async (e) => {
     e.preventDefault();
-    if (!newFood.name || !newFood.calories) return toast.error("Vui lòng nhập tên và lượng calo!");
+    if (!newFood.name) return toast.error('Vui lòng nhập tên món ăn');
+    const cal = Number(newFood.calories);
+    if (!Number.isFinite(cal) || cal <= 0) {
+      return toast.error('Cần có calo. Bạn có thể bấm "Ước tính bằng AI" để tự điền calo/macro.');
+    }
     try {
+      setFoodSaving(true);
       const res = await nutritionService.createFood({ ...newFood, category: 'Cá nhân' });
       setQuickMeals([res.data.data, ...quickMeals]);
       setShowCreateFood(false);
@@ -72,6 +128,62 @@ function Nutrition() {
       toast.success('Đã lưu vào danh sách món ăn cá nhân!');
     } catch (err) {
       toast.error('Lỗi khi lưu món ăn');
+    } finally {
+      setFoodSaving(false);
+    }
+  };
+
+  const parseLabeledNumber = (text, label) => {
+    const safeText = String(text || '');
+    const re = new RegExp(`${label}\\s*[:=]\\s*([0-9]+(?:[\\.,][0-9]+)?)`, 'i');
+    const m = re.exec(safeText);
+    if (!m) return null;
+    const raw = m[1].replace(',', '.');
+    const num = Number(raw);
+    return Number.isFinite(num) ? num : null;
+  };
+
+  const estimateFoodWithAI = async () => {
+    const name = newFood.name?.trim();
+    if (!name) return toast.error('Hãy nhập tên món ăn trước');
+    if (foodAiBusy) return;
+
+    setFoodAiBusy(true);
+    try {
+      const prompt =
+        `Ước tính dinh dưỡng cho món ăn: "${name}".\n` +
+        `Hãy trả về đúng 4 dòng theo mẫu (không thêm bất kỳ chữ nào khác):\n` +
+        `CALORIES: <số kcal>\n` +
+        `PROTEIN: <số g>\n` +
+        `CARBS: <số g>\n` +
+        `FAT: <số g>\n` +
+        `Ước lượng theo 1 khẩu phần ăn thông thường. Nếu không chắc chắn, hãy đưa ước lượng hợp lý.`;
+
+      const res = await sendChatMessage(prompt, []);
+      const reply = res.data?.data?.reply || '';
+
+      const calories = parseLabeledNumber(reply, 'CALORIES');
+      const protein = parseLabeledNumber(reply, 'PROTEIN');
+      const carbs = parseLabeledNumber(reply, 'CARBS');
+      const fat = parseLabeledNumber(reply, 'FAT');
+
+      if ([calories, protein, carbs, fat].some((v) => v == null)) {
+        toast.error('AI không trả về đủ số liệu. Bạn thử lại hoặc nhập tay.');
+        return;
+      }
+
+      setNewFood((prev) => ({
+        ...prev,
+        calories: Math.round(calories).toString(),
+        protein: Math.round(protein).toString(),
+        carbs: Math.round(carbs).toString(),
+        fat: Math.round(fat).toString(),
+      }));
+      toast.success('AI đã ước tính calo/macro cho món này');
+    } catch {
+      toast.error('Không ước tính được bằng AI (lỗi server hoặc thiếu API key).');
+    } finally {
+      setFoodAiBusy(false);
     }
   };
 
@@ -134,8 +246,94 @@ function Nutrition() {
       .finally(() => setLoading(false));
   }, []);
 
-  const targetCalories = user?.autoStats?.tdee ?? 1796;
+  const smartTargets = calcSmartTargets(user);
+  const targetCalories = smartTargets?.targetIntake ?? user?.autoStats?.tdee ?? 1796;
   const remaining = Math.max(targetCalories - caloriesToday, 0);
+
+  // Heuristic cho "rau/củ/quả" chỉ dựa vào từ khóa trong `name`/`category`
+  const vegKeywords = [
+    'rau', 'salad', 'cải', 'bông cải', 'bắp cải', 'cà chua', 'tomato', 'cà rốt', 'carrot', 'dưa leo', 'cucumber',
+    'hành', 'tỏi', 'ớt', 'ớt chuông', 'ớt hiểm', 'hành tây', 'onion', 'ngô', 'bắp', 'quả', 'trái cây', 'fruit',
+  ];
+
+  const isVegOrFruit = (food) => {
+    const name = (food?.name || '').toLowerCase();
+    const category = (food?.category || '').toLowerCase();
+    if (!name && !category) return false;
+    return vegKeywords.some((k) => name.includes(k) || category.includes(k));
+  };
+
+  const pickFoodClosest = (foods, target, usedSet) => {
+    const candidates = (foods || [])
+      .filter((f) => typeof f?.calories === 'number' && f.calories > 0)
+      .map((f) => ({ f, diff: Math.abs(f.calories - target) }))
+      .sort((a, b) => a.diff - b.diff);
+
+    if (!candidates.length) return null;
+    const pick = candidates.find(({ f }) => !usedSet?.has(f._id));
+    return (pick?.f || candidates[0].f);
+  };
+
+  const generateMealPlan7Days = () => {
+    if (!Array.isArray(libraryFoods) || libraryFoods.length < 10) {
+      toast.error('Món trong thư viện chưa đủ để tạo thực đơn');
+      return;
+    }
+
+    setPlanBusy(true);
+    try {
+      const foods = libraryFoods.filter((f) => typeof f?.calories === 'number' && f.calories > 0);
+      const vegFoods = foods.filter(isVegOrFruit);
+      const mainFoods = foods.filter((f) => !isVegOrFruit(f));
+
+      const effectiveMainFoods = mainFoods.length ? mainFoods : foods;
+      const effectiveVegFoods = vegFoods.length ? vegFoods : foods;
+
+      const now = new Date();
+      const usedFoodIds = new Set();
+
+      const mealPlan = Array.from({ length: 7 }).map((_, dayIdx) => {
+        const d = new Date(now);
+        d.setDate(now.getDate() + dayIdx);
+        const dateStr = d.toISOString().split('T')[0];
+
+        const breakfastTarget = Math.round(targetCalories * 0.25);
+        const lunchTarget = Math.round(targetCalories * 0.35);
+        const snackTarget = Math.round(targetCalories * 0.15);
+        const dinnerTarget = Math.round(targetCalories * 0.25);
+        const vegTarget = Math.max(80, Math.round(targetCalories * 0.07));
+
+        const breakfast = pickFoodClosest(effectiveMainFoods, breakfastTarget, usedFoodIds);
+        if (breakfast?._id) usedFoodIds.add(breakfast._id);
+        const lunch = pickFoodClosest(effectiveMainFoods, lunchTarget, usedFoodIds);
+        if (lunch?._id) usedFoodIds.add(lunch._id);
+        const snack = pickFoodClosest(effectiveMainFoods, snackTarget, usedFoodIds);
+        if (snack?._id) usedFoodIds.add(snack._id);
+        const dinner = pickFoodClosest(effectiveMainFoods, dinnerTarget, usedFoodIds);
+        if (dinner?._id) usedFoodIds.add(dinner._id);
+        const veg = pickFoodClosest(effectiveVegFoods, vegTarget, usedFoodIds);
+        if (veg?._id) usedFoodIds.add(veg._id);
+
+        return {
+          dateStr,
+          meals: {
+            Breakfast: breakfast,
+            Lunch: lunch,
+            Snack: snack, // map từ "Chiều"
+            Dinner: dinner,
+          },
+          veg,
+        };
+      });
+
+      setMealPlan7d(mealPlan);
+      toast.success('Đã tạo thực đơn 7 ngày (gợi ý)');
+    } catch {
+      toast.error('Tạo thực đơn thất bại');
+    } finally {
+      setPlanBusy(false);
+    }
+  };
 
   const addCalories = (amount, label, mealType = 'Snack', additionalMacros = { protein: 0, carbs: 0, fat: 0, glucose: 0 }) => {
     const newTotal = caloriesToday + amount;
@@ -376,7 +574,17 @@ function Nutrition() {
         <section className="today-section">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
             <h2 className="today-section-title" style={{ margin: 0 }}>Thư viện món ăn</h2>
-            <button className="coach-see-all" onClick={() => setShowAllLibrary(true)}>Xem tất cả</button>
+            <button
+              className="coach-see-all"
+              onClick={() => {
+                // "Xem tất cả" nghĩa là bỏ lọc/search để hiển thị đầy đủ dữ liệu ~333 món
+                setSelectedCategory('');
+                setFoodQuery('');
+                setShowAllLibrary(true);
+              }}
+            >
+              Xem tất cả
+            </button>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', marginBottom: '1rem' }}>
             <div className="coach-filters" style={{ padding: 0, display: 'flex', flexWrap: 'wrap', gap: '8px', overflowX: 'visible', flex: 1 }}>
@@ -390,6 +598,22 @@ function Nutrition() {
                 </button>
               ))}
             </div>
+              <input
+                type="text"
+                value={foodQuery}
+                onChange={(e) => setFoodQuery(e.target.value)}
+                placeholder="Tìm món ăn..."
+                style={{
+                  background: 'var(--fitbit-card)',
+                  color: 'var(--fitbit-text)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  borderRadius: '20px',
+                  padding: '6px 14px',
+                  fontSize: '0.85rem',
+                  outline: 'none',
+                  minWidth: '220px',
+                }}
+              />
             <select
               value={selectedCategory}
               onChange={e => setSelectedCategory(e.target.value)}
@@ -419,16 +643,36 @@ function Nutrition() {
             onMouseMove={handleMouseMove}
             style={{ paddingBottom: '16px', display: 'flex', gap: '16px', overflowX: 'auto', WebkitOverflowScrolling: 'touch', cursor: 'grab' }}
           >
-            {libraryFoods.map(food => (
-              <div key={food._id} className="coach-card" style={{ minWidth: '200px', flexShrink: 0 }}>
-                <div className="coach-card-image-wrap" onClick={() => addCalories(food.calories, food.name, activeMealTab, { protein: food.protein, carbs: food.carbs, fat: food.fat, glucose: food.glucose || 0 })}>
-                  <img src={food.image || `https://loremflickr.com/400/300/food?lock=${food.name.length}`} alt={food.name} className="coach-card-image" draggable="false" style={{ cursor: 'pointer', height: '140px', objectFit: 'cover' }} />
-                  <span className="coach-card-play" style={{ cursor: 'pointer', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><i className="bi bi-plus" style={{ fontSize: '1.5rem', marginLeft: 0 }} /></span>
-                </div>
-                <h3 className="coach-card-title" style={{ marginTop: '12px' }}>{food.name}</h3>
-                <p className="coach-card-meta">{food.calories} cal · {food.category}</p>
+            {libraryFoods.length === 0 ? (
+              <div style={{ padding: '2rem 1rem', width: '100%', textAlign: 'center' }}>
+                <p style={{ margin: 0, color: 'var(--fitbit-muted)' }}>Không có món phù hợp với bộ lọc hiện tại.</p>
+                <p style={{ margin: '8px 0 0', color: 'var(--fitbit-muted)', fontSize: '0.85rem' }}>
+                  Thử đổi `category` hoặc nhập từ khóa trong ô tìm kiếm.
+                </p>
               </div>
-            ))}
+            ) : (
+              libraryFoods.map((food) => (
+                <div key={food._id} className="coach-card" style={{ minWidth: '200px', flexShrink: 0 }}>
+                  <div
+                    className="coach-card-image-wrap"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Thêm ${food.name} vào ${activeMealTab}`}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' && e.key !== ' ') return;
+                      e.preventDefault();
+                      addCalories(food.calories, food.name, activeMealTab, { protein: food.protein, carbs: food.carbs, fat: food.fat, glucose: food.glucose || 0 });
+                    }}
+                    onClick={() => addCalories(food.calories, food.name, activeMealTab, { protein: food.protein, carbs: food.carbs, fat: food.fat, glucose: food.glucose || 0 })}
+                  >
+                    <img src={getFoodImageSrc(food)} alt={food.name} className="coach-card-image" draggable="false" style={{ cursor: 'pointer', height: '140px', objectFit: 'cover' }} />
+                    <span className="coach-card-play" style={{ cursor: 'pointer', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><i className="bi bi-plus" style={{ fontSize: '1.5rem', marginLeft: 0 }} /></span>
+                  </div>
+                  <h3 className="coach-card-title" style={{ marginTop: '12px' }}>{food.name}</h3>
+                  <p className="coach-card-meta">{food.calories} cal · {food.category}</p>
+                </div>
+              ))
+            )}
           </div>
         </section>
 
@@ -462,6 +706,72 @@ function Nutrition() {
               ))
             )}
           </div>
+        </section>
+
+        <section className="today-section">
+          <h2 className="today-section-title" style={{ fontSize: '1.1rem' }}>Thực đơn 7 ngày (gợi ý)</h2>
+          <div className="today-cards today-cards--2col">
+            <div className="fitbit-card card-dark" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+              <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+                <p className="fitbit-card-title" style={{ margin: 0, fontSize: '0.92rem' }}>Mục tiêu mỗi ngày</p>
+                <p className="fitbit-card-value" style={{ margin: 0 }}>{targetCalories.toLocaleString()} cal</p>
+              </div>
+
+              <button
+                type="button"
+                className="btn btn-fitbit"
+                onClick={generateMealPlan7Days}
+                disabled={planBusy || libraryFoods.length < 10}
+                style={{ width: '100%' }}
+              >
+                {planBusy ? 'Đang tạo...' : 'Tạo thực đơn 7 ngày'}
+              </button>
+
+              <p className="fitbit-card-sub" style={{ marginTop: '10px', fontSize: '0.8rem' }}>
+                Chia: Sáng/Trưa/Chiều/Tối + (Rau/củ/quả).
+              </p>
+            </div>
+
+            <div className="fitbit-card card-dark" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+              <p className="fitbit-card-title" style={{ marginBottom: 6, fontSize: '0.92rem' }}>Ghi chú</p>
+              <p className="fitbit-card-sub" style={{ margin: 0, fontSize: '0.8rem' }}>
+                Gợi ý được chọn theo calo gần mục tiêu và heuristics từ từ khóa “rau/củ/quả”.
+              </p>
+            </div>
+          </div>
+
+          {mealPlan7d && (
+            <div style={{ marginTop: '16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+              {mealPlan7d.map((day, idx) => {
+                const date = new Date(day.dateStr);
+                const dayLabel = date.toLocaleDateString('vi-VN', { weekday: 'long' });
+                return (
+                  <div key={day.dateStr} className="fitbit-card card-dark" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+                    <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+                      <p className="fitbit-card-title" style={{ margin: 0, fontSize: '0.92rem' }}>Ngày {idx + 1}</p>
+                      <p className="fitbit-card-sub" style={{ margin: 0, fontSize: '0.8rem' }}>{dayLabel}</p>
+                    </div>
+
+                    <p className="fitbit-card-sub" style={{ margin: 0, fontSize: '0.82rem' }}>
+                      Sáng: <strong style={{ color: '#fff', fontSize: '0.92rem' }}>{day.meals.Breakfast?.name || '—'}</strong> ({day.meals.Breakfast?.calories ?? 0} cal)
+                    </p>
+                    <p className="fitbit-card-sub" style={{ margin: 0, fontSize: '0.82rem' }}>
+                      Trưa: <strong style={{ color: '#fff', fontSize: '0.92rem' }}>{day.meals.Lunch?.name || '—'}</strong> ({day.meals.Lunch?.calories ?? 0} cal)
+                    </p>
+                    <p className="fitbit-card-sub" style={{ margin: 0, fontSize: '0.82rem' }}>
+                      Chiều: <strong style={{ color: '#fff', fontSize: '0.92rem' }}>{day.meals.Snack?.name || '—'}</strong> ({day.meals.Snack?.calories ?? 0} cal)
+                    </p>
+                    <p className="fitbit-card-sub" style={{ margin: 0, fontSize: '0.82rem' }}>
+                      Tối: <strong style={{ color: '#fff', fontSize: '0.92rem' }}>{day.meals.Dinner?.name || '—'}</strong> ({day.meals.Dinner?.calories ?? 0} cal)
+                    </p>
+                    <p className="fitbit-card-sub" style={{ margin: 0, fontSize: '0.82rem' }}>
+                      Rau/củ/quả: <strong style={{ color: '#fff', fontSize: '0.92rem' }}>{day.veg?.name || '—'}</strong> ({day.veg?.calories ?? 0} cal)
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         {/* Custom Meal Input Section Removed per request */}
@@ -650,6 +960,22 @@ function Nutrition() {
                   </button>
                 ))}
               </div>
+              <input
+                type="text"
+                value={foodQuery}
+                onChange={(e) => setFoodQuery(e.target.value)}
+                placeholder="Tìm món ăn..."
+                style={{
+                  background: 'var(--fitbit-card)',
+                  color: 'var(--fitbit-text)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  borderRadius: '20px',
+                  padding: '6px 14px',
+                  fontSize: '0.85rem',
+                  outline: 'none',
+                  minWidth: '220px',
+                }}
+              />
               <select
                 value={selectedCategory}
                 onChange={e => setSelectedCategory(e.target.value)}
@@ -672,16 +998,37 @@ function Nutrition() {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '20px', overflowY: 'auto', paddingRight: '10px' }} className="hide-scrollbar">
-              {libraryFoods.map(food => (
-                <div key={food._id} className="coach-card">
-                  <div className="coach-card-image-wrap" onClick={() => { addCalories(food.calories, food.name, activeMealTab, { protein: food.protein, carbs: food.carbs, fat: food.fat }); setShowAllLibrary(false); }}>
-                    <img src={food.image || `https://loremflickr.com/400/300/food?lock=${food.name.length}`} alt={food.name} className="coach-card-image" draggable="false" style={{ cursor: 'pointer', height: '140px', objectFit: 'cover' }} />
-                    <span className="coach-card-play" style={{ cursor: 'pointer', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><i className="bi bi-plus" style={{ fontSize: '1.5rem', marginLeft: 0 }} /></span>
-                  </div>
-                  <h3 className="coach-card-title" style={{ marginTop: '12px' }}>{food.name}</h3>
-                  <p className="coach-card-meta">{food.calories} cal · {food.category}</p>
+              {libraryFoods.length === 0 ? (
+                <div style={{ padding: '2rem 1rem', width: '100%', textAlign: 'center', gridColumn: '1 / -1' }}>
+                  <p style={{ margin: 0, color: 'var(--fitbit-muted)' }}>Không có món phù hợp để hiển thị.</p>
                 </div>
-              ))}
+              ) : (
+                libraryFoods.map((food) => (
+                  <div key={food._id} className="coach-card">
+                    <div
+                      className="coach-card-image-wrap"
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Thêm ${food.name} vào ${activeMealTab}`}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter' && e.key !== ' ') return;
+                        e.preventDefault();
+                        addCalories(food.calories, food.name, activeMealTab, { protein: food.protein, carbs: food.carbs, fat: food.fat, glucose: food.glucose || 0 });
+                        setShowAllLibrary(false);
+                      }}
+                      onClick={() => {
+                        addCalories(food.calories, food.name, activeMealTab, { protein: food.protein, carbs: food.carbs, fat: food.fat, glucose: food.glucose || 0 });
+                        setShowAllLibrary(false);
+                      }}
+                    >
+                      <img src={getFoodImageSrc(food)} alt={food.name} className="coach-card-image" draggable="false" style={{ cursor: 'pointer', height: '140px', objectFit: 'cover' }} />
+                      <span className="coach-card-play" style={{ cursor: 'pointer', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><i className="bi bi-plus" style={{ fontSize: '1.5rem', marginLeft: 0 }} /></span>
+                    </div>
+                    <h3 className="coach-card-title" style={{ marginTop: '12px' }}>{food.name}</h3>
+                    <p className="coach-card-meta">{food.calories} cal · {food.category}</p>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -702,24 +1049,69 @@ function Nutrition() {
                 <input type="text" className="form-control" required placeholder="Ví dụ: Sinh tố bơ" value={newFood.name} onChange={(e) => setNewFood({...newFood, name: e.target.value})} />
               </div>
               <div className="mb-3">
-                <label className="form-label">Lượng Calo (kcal) <span className="text-danger">*</span></label>
-                <input type="number" min="0" className="form-control" required placeholder="Ví dụ: 300" value={newFood.calories} onChange={(e) => setNewFood({...newFood, calories: e.target.value})} />
+                <label className="form-label">
+                  Lượng Calo (kcal) <span className="text-danger">*</span>
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  className="form-control"
+                  placeholder="Ví dụ: 300 (hoặc bấm AI để ước tính)"
+                  value={newFood.calories}
+                  disabled={foodSaving}
+                  onChange={(e) => setNewFood({ ...newFood, calories: e.target.value })}
+                />
+
+                <button
+                  type="button"
+                  className="btn btn-fitbit w-100 mt-2"
+                  disabled={foodAiBusy || !newFood.name?.trim()}
+                  onClick={estimateFoodWithAI}
+                >
+                  {foodAiBusy ? 'Đang ước tính...' : 'Ước tính calo/macro bằng AI'}
+                </button>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
                 <div className="mb-3">
                   <label className="form-label">Protein (g)</label>
-                  <input type="number" min="0" className="form-control" placeholder="0" value={newFood.protein} onChange={(e) => setNewFood({...newFood, protein: e.target.value})} />
+                  <input
+                    type="number"
+                    min="0"
+                    className="form-control"
+                    placeholder="0"
+                    value={newFood.protein}
+                    disabled={foodSaving}
+                    onChange={(e) => setNewFood({ ...newFood, protein: e.target.value })}
+                  />
                 </div>
                 <div className="mb-3">
                   <label className="form-label">Carbs (g)</label>
-                  <input type="number" min="0" className="form-control" placeholder="0" value={newFood.carbs} onChange={(e) => setNewFood({...newFood, carbs: e.target.value})} />
+                  <input
+                    type="number"
+                    min="0"
+                    className="form-control"
+                    placeholder="0"
+                    value={newFood.carbs}
+                    disabled={foodSaving}
+                    onChange={(e) => setNewFood({ ...newFood, carbs: e.target.value })}
+                  />
                 </div>
                 <div className="mb-3">
                   <label className="form-label">Fat (g)</label>
-                  <input type="number" min="0" className="form-control" placeholder="0" value={newFood.fat} onChange={(e) => setNewFood({...newFood, fat: e.target.value})} />
+                  <input
+                    type="number"
+                    min="0"
+                    className="form-control"
+                    placeholder="0"
+                    value={newFood.fat}
+                    disabled={foodSaving}
+                    onChange={(e) => setNewFood({ ...newFood, fat: e.target.value })}
+                  />
                 </div>
               </div>
-              <button type="submit" className="btn btn-fitbit w-100 mt-3">Lưu món ăn</button>
+              <button type="submit" className="btn btn-fitbit w-100 mt-3" disabled={foodSaving}>
+                {foodSaving ? 'Đang lưu...' : 'Lưu món ăn'}
+              </button>
             </form>
           </div>
         </div>

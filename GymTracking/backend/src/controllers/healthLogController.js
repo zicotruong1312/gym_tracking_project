@@ -1,6 +1,7 @@
 const HealthLog = require('../models/HealthLog');
 const User = require('../models/User');
 const DailySummary = require('../models/DailySummary');
+const { emitToUser } = require('../utils/socketHub');
 
 const addWeightLog = async (req, res) => {
   try {
@@ -40,6 +41,7 @@ const addWeightLog = async (req, res) => {
       );
     }
 
+    emitToUser(req.user._id, 'healthflow:update', { scope: 'health' });
     res.status(201).json(log);
   } catch (error) {
     res.status(500).json({ message: error.message });

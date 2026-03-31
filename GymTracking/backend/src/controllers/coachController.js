@@ -39,10 +39,73 @@ const getClassesByInstructor = async (req, res) => {
   }
 };
 
+const markClassViewed = async (req, res) => {
+  try {
+    const { classId } = req.params;
+    if (!classId) return res.status(400).json({ success: false, message: 'Missing classId' });
+
+    const updated = await CoachClass.findByIdAndUpdate(
+      classId,
+      { $inc: { viewsCount: 1 } },
+      { new: true }
+    );
+
+    if (!updated) return res.status(404).json({ success: false, message: 'Class not found' });
+    return res.json({ success: true, data: { viewsCount: updated.viewsCount } });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const addClassWatchSeconds = async (req, res) => {
+  try {
+    const { classId } = req.params;
+    const secondsRaw = req.body?.seconds;
+    const seconds = Math.max(0, Math.min(24 * 60 * 60, Number(secondsRaw)));
+
+    if (!classId) return res.status(400).json({ success: false, message: 'Missing classId' });
+    if (!Number.isFinite(seconds)) return res.status(400).json({ success: false, message: 'Invalid seconds' });
+
+    if (seconds === 0) return res.json({ success: true, data: { ok: true } });
+
+    const updated = await CoachClass.findByIdAndUpdate(
+      classId,
+      { $inc: { totalWatchSeconds: seconds, watchEvents: 1 } },
+      { new: true }
+    );
+
+    if (!updated) return res.status(404).json({ success: false, message: 'Class not found' });
+    return res.json({ success: true, data: { totalWatchSeconds: updated.totalWatchSeconds } });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const markClassLiked = async (req, res) => {
+  try {
+    const { classId } = req.params;
+    if (!classId) return res.status(400).json({ success: false, message: 'Missing classId' });
+
+    const updated = await CoachClass.findByIdAndUpdate(
+      classId,
+      { $inc: { likesCount: 1 } },
+      { new: true }
+    );
+
+    if (!updated) return res.status(404).json({ success: false, message: 'Class not found' });
+    return res.json({ success: true, data: { likesCount: updated.likesCount } });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   getClasses,
   getInstructors,
   getBrands,
   getClassesByInstructor,
+  markClassViewed,
+  addClassWatchSeconds,
+  markClassLiked,
 };
 

@@ -1,11 +1,26 @@
 import { NavLink, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
 import { useUser } from '../context/UserContext';
+import ChatAssistant from './ChatAssistant';
+import { connectHealthSocket, disconnectHealthSocket } from '../services/socketService';
 
 function Layout({ children }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, fetchUser } = useUser();
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) connectHealthSocket(token);
+    const onRefresh = () => {
+      fetchUser();
+    };
+    window.addEventListener('healthflow:refresh', onRefresh);
+    return () => {
+      window.removeEventListener('healthflow:refresh', onRefresh);
+      disconnectHealthSocket();
+    };
+  }, [fetchUser]);
   const [headerDate, setHeaderDate] = useState('');
 
   useEffect(() => {
@@ -60,40 +75,40 @@ function Layout({ children }) {
 
   return (
     <div className="app-wrapper">
-      <aside className="app-sidebar">
+      <aside className="app-sidebar" aria-label="Menu điều hướng">
         <div className="sidebar-logo">
           <i className="bi bi-heart-pulse-fill" />
         </div>
-        <nav className="sidebar-nav">
-          <NavLink to="/today" className={({ isActive }) => (isActive ? 'active-link' : '')} title="Today">
+        <nav className="sidebar-nav" role="navigation" aria-label="Điều hướng chính">
+          <NavLink to="/today" className={({ isActive }) => (isActive ? 'active-link' : '')} title="Today" aria-label="Today">
             <i className="bi bi-house-door" />
           </NavLink>
-          <NavLink to="/workout" className={({ isActive }) => (isActive ? 'active-link' : '')} title="Bài tập">
+          <NavLink to="/workout" className={({ isActive }) => (isActive ? 'active-link' : '')} title="Bài tập" aria-label="Bài tập">
             <i className="bi bi-lightning" />
           </NavLink>
-          <NavLink to="/coach" className={({ isActive }) => (isActive ? 'active-link' : '')} title="Coach">
+          <NavLink to="/coach" className={({ isActive }) => (isActive ? 'active-link' : '')} title="Coach" aria-label="Coach">
             <i className="bi bi-grid-3x3-gap" />
           </NavLink>
-          <NavLink to="/stats" className={({ isActive }) => (isActive ? 'active-link' : '')} title="Thống kê">
+          <NavLink to="/stats" className={({ isActive }) => (isActive ? 'active-link' : '')} title="Thống kê" aria-label="Thống kê">
             <i className="bi bi-bar-chart-line" />
           </NavLink>
-          <NavLink to="/nutrition" className={({ isActive }) => (isActive ? 'active-link' : '')} title="Dinh dưỡng">
+          <NavLink to="/nutrition" className={({ isActive }) => (isActive ? 'active-link' : '')} title="Dinh dưỡng" aria-label="Dinh dưỡng">
             <i className="bi bi-egg-fried" />
           </NavLink>
-          <NavLink to="/water" className={({ isActive }) => (isActive ? 'active-link' : '')} title="Nước">
+          <NavLink to="/water" className={({ isActive }) => (isActive ? 'active-link' : '')} title="Nước" aria-label="Nước">
             <i className="bi bi-droplet-half" />
           </NavLink>
-          <NavLink to="/sleep" className={({ isActive }) => (isActive ? 'active-link' : '')} title="Giấc ngủ">
+          <NavLink to="/sleep" className={({ isActive }) => (isActive ? 'active-link' : '')} title="Giấc ngủ" aria-label="Giấc ngủ">
             <i className="bi bi-moon-stars" />
           </NavLink>
-          <NavLink to="/history" className={({ isActive }) => (isActive ? 'active-link' : '')} title="Lịch sử">
+          <NavLink to="/history" className={({ isActive }) => (isActive ? 'active-link' : '')} title="Lịch sử" aria-label="Lịch sử">
             <i className="bi bi-clock-history" />
           </NavLink>
         </nav>
       </aside>
 
       <main className="app-main">
-        <header className="top-bar">
+        <header className="top-bar" role="banner">
           <div className="top-bar-center">
             <div className="brand">HealthFlow</div>
             <div className="view-label">{pageTitle}</div>
@@ -101,13 +116,18 @@ function Layout({ children }) {
           </div>
           <div className="top-bar-right">
             {user?.name && <span className="top-bar-user-name">{user.name}</span>}
-            <Link to="/profile" className="icon-btn icon-btn--user" title="Hồ sơ – Chỉnh sửa chỉ số cá nhân">
+            <Link
+              to="/profile"
+              className="icon-btn icon-btn--user"
+              title="Hồ sơ – Chỉnh sửa chỉ số cá nhân"
+              aria-label="Hồ sơ – Chỉnh sửa chỉ số cá nhân"
+            >
               <i className="bi bi-person-circle" />
             </Link>
-            <Link to="/settings" className="icon-btn" title="Cài đặt">
+            <Link to="/settings" className="icon-btn" title="Cài đặt" aria-label="Cài đặt">
               <i className="bi bi-gear" />
             </Link>
-            <button type="button" className="icon-btn" title="Đăng xuất" onClick={logout}>
+            <button type="button" className="icon-btn" title="Đăng xuất" aria-label="Đăng xuất" onClick={logout}>
               <i className="bi bi-box-arrow-right" />
             </button>
           </div>
@@ -116,6 +136,8 @@ function Layout({ children }) {
         <div className={`content-area ${['/today', '/workout', '/coach', '/stats', '/profile', '/nutrition', '/sleep', '/history', '/water'].includes(location.pathname) ? 'content-area--wide' : ''}`}>
           {children}
         </div>
+
+        {location.pathname !== '/workout' && <ChatAssistant />}
 
         {location.pathname !== '/workout' && (
           <div className="fab-wrap" ref={fabWrapRef}>
